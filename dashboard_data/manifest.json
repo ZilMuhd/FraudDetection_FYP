@@ -1,0 +1,133 @@
+{
+  "parts": {
+    "paysim_rw": {
+      "features_G": [
+        "origin_pageRank",
+        "origin_degree",
+        "origin_communitySize",
+        "dest_pageRank",
+        "dest_degree",
+        "dest_communitySize",
+        "amount",
+        "hour",
+        "type_is_transfer"
+      ],
+      "features_NG": [
+        "amount",
+        "hour",
+        "type_is_transfer"
+      ]
+    },
+    "paysim_random": {
+      "features": [
+        "origin_pageRank",
+        "origin_degree",
+        "origin_communitySize",
+        "dest_pageRank",
+        "dest_degree",
+        "dest_communitySize",
+        "amount",
+        "step",
+        "type_is_transfer"
+      ]
+    },
+    "simulation": {
+      "features": [
+        "origin_pageRank",
+        "origin_degree",
+        "dest_pageRank",
+        "dest_degree",
+        "amount",
+        "step",
+        "type_is_transfer"
+      ]
+    },
+    "noisy_clean": {
+      "features": [
+        "origin_pageRank",
+        "origin_degree",
+        "dest_pageRank",
+        "dest_degree",
+        "amount",
+        "hour",
+        "type_is_transfer"
+      ]
+    },
+    "noisy_low": {
+      "features": [
+        "origin_pageRank",
+        "origin_degree",
+        "dest_pageRank",
+        "dest_degree",
+        "amount",
+        "hour",
+        "type_is_transfer"
+      ]
+    },
+    "noisy_medium": {
+      "features": [
+        "origin_pageRank",
+        "origin_degree",
+        "dest_pageRank",
+        "dest_degree",
+        "amount",
+        "hour",
+        "type_is_transfer"
+      ]
+    },
+    "noisy_high": {
+      "features": [
+        "origin_pageRank",
+        "origin_degree",
+        "dest_pageRank",
+        "dest_degree",
+        "amount",
+        "hour",
+        "type_is_transfer"
+      ]
+    },
+    "paysim_neighbourhoods": true
+  },
+  "checks": {
+    "paysim_rw_G": {
+      "pr_auc": 0.5556,
+      "reported": 0.5556,
+      "match": true
+    },
+    "paysim_rw_NG": {
+      "pr_auc": 0.3642,
+      "reported": 0.3642,
+      "match": true
+    },
+    "paysim_random": {
+      "pr_auc": 0.4787,
+      "reported": 0.4787,
+      "match": true
+    },
+    "simulation": {
+      "pr_auc": 0.9773,
+      "reported": 0.9773,
+      "match": true
+    },
+    "noisy_clean_G-noCS": {
+      "pr_auc": 0.9101,
+      "reported": 0.9102,
+      "match": true
+    },
+    "noisy_low_G-noCS": {
+      "pr_auc": 0.7765,
+      "reported": 0.7755,
+      "match": true
+    },
+    "noisy_medium_G-noCS": {
+      "pr_auc": 0.3039,
+      "reported": 0.3023,
+      "match": true
+    },
+    "noisy_high_G-noCS": {
+      "pr_auc": 0.3707,
+      "reported": 0.366,
+      "match": true
+    }
+  }
+}
