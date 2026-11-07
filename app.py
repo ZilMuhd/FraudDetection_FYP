@@ -486,7 +486,7 @@ def inspector(df, label_col, score_col, model, feats, about):
         insight(pts, "The strongest reasons, in words")
         total = base + float(ex["contribution"].sum())
         note(f"<b>How the numbers add up.</b> The model starts every transaction from the same point, the average case "
-             f"({base:+.2f}). Adding all the bars gives {total:+.2f}, which converts to the fraud score "
+             f"({base:+.2f}). Adding all the bars to it gives {total:+.2f}, which converts to the fraud score "
              f"{1 / (1 + np.exp(-total)):.3f}. Each +1 roughly multiplies the odds of fraud by 2.7 and each -1 divides them by "
              "2.7, so +12 means the evidence is overwhelming. The numbers are not percentages; compare their sizes and signs.")
         note("<b>What the features mean.</b> PageRank: how central the account is in the money flow of the earlier graph. "
