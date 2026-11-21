@@ -126,6 +126,17 @@ header[data-testid="stHeader"] button, header[data-testid="stHeader"] a, [data-t
        font-size: 0.92rem; line-height: 1.55; margin: 0.7rem 0 0.2rem 0;}
 .note b {color: var(--ink);}
 
+/* UAT fixes: purpose banners, definition markers, noise-level bar */
+.purpose {font-size: 1.12rem; font-weight: 600; color: var(--ink); background: var(--card); border-left: 5px solid var(--blue);
+          border-radius: 12px; padding: 0.75rem 1.1rem; margin: 0.5rem 0 0.9rem 0; line-height: 1.45;}
+.purpose b {color: var(--blue);}
+.term::after {content: "\\24D8"; font-size: 0.72em; margin-left: 0.18em; vertical-align: super; opacity: 0.8;}
+.hint {font-size: 0.86rem; color: var(--ink2); margin: -0.2rem 0 0.3rem 0;}
+.st-key-levelbar {background: var(--card); border: 2px solid var(--orange); border-radius: 16px; padding: 0.5rem 0.9rem; margin-top: 0.55rem;}
+.levellab {font-weight: 800; font-size: 1.02rem; color: var(--ink); line-height: 1.2;}
+.levellab small {display: block; font-weight: 500; font-size: 0.8rem; color: var(--ink2);}
+.insight .lead {margin-bottom: 0.45rem;}
+
 /* bar charts */
 .bars {background: var(--card); border-radius: 20px; padding: 1.1rem 1.3rem; color: var(--ink);}
 .bars .bt {font-size: 0.95rem; font-weight: 800; margin-bottom: 0.2rem;}
@@ -283,6 +294,11 @@ def note(s):
     H(f"<div class='note'>{s}</div>")
 
 
+def purpose(text, what="tab"):
+    """One-line banner saying what a page, tab or section is for (UAT feedback)."""
+    H(f"<div class='purpose'><b>This {what} shows:</b> {text}</div>")
+
+
 def legend(items):
     """items: (color, text, kind) with kind in sq, dot, ln, ring, dash."""
     return "<div class='legend'>" + "".join(
@@ -424,6 +440,62 @@ FEATURE_TEXT = {
 }
 
 
+def reason_phrase(f, v):
+    """Plain-English description of one feature value, stated from the data only."""
+    v = float(v)
+    side = "sender" if f.startswith("origin") else "receiver"
+    if f.endswith("_degree"):
+        n = int(round(v))
+        return (f"the {side} had no transactions in the network (a new account)" if n == 0
+                else f"the {side} took part in {n:,} transaction{'' if n == 1 else 's'} in the network")
+    if f.endswith("_pageRank"):
+        return (f"the {side} had no history in the network (PageRank 0)" if v == 0
+                else f"the {side}'s place in the money flow (PageRank {v:.3f})")
+    if f.endswith("_communitySize"):
+        n = int(round(v))
+        return (f"the {side} belonged to no community (no history)" if n == 0
+                else f"the {side}'s Louvain community has {n:,} account{'' if n == 1 else 's'}")
+    if f == "amount":
+        return f"the amount was {v:,.0f}"
+    if f == "hour":
+        return f"it was made at {int(v):02d}:00"
+    if f == "step":
+        return f"it was made at time step {int(v)}"
+    if f == "type_is_transfer":
+        return "it was a transfer to another account" if v == 1 else "it was a cash-out"
+    return f"{FEATURE_TEXT.get(f, f)} was {nice(v)}"
+
+
+def plain_reasons(ex, score, th, is_fraud):
+    """The plain-language summary shown above the SHAP chart (UAT Task 7)."""
+    cap = lambda s: s[0].upper() + s[1:]
+    flagged = score >= th
+    pos = (f"Scored {score:.3f}, {'at or above' if flagged else 'below'} the {th:.2f} threshold, "
+           f"so it was {'flagged' if flagged else 'not flagged'}.")
+    item = lambda r, verb, most: f"{cap(reason_phrase(r.feature, r.value))} <b>({verb} the score{' most' if most else ''})</b>"
+    sig = ex[ex["contribution"].abs() >= 0.01]
+    if is_fraud and not flagged:
+        down = sig[sig["contribution"] < 0].sort_values("contribution").head(3)
+        up = sig[sig["contribution"] > 0].sort_values("contribution", ascending=False).head(1)
+        body = f"<p class='lead'><b>The model missed this fraud because it looked like a normal transaction.</b> {pos}</p>"
+        if len(down):
+            body += "<p>What made it look normal:</p><ul>" + "".join(
+                f"<li>{item(r, 'lowered', i == 0)}</li>" for i, r in enumerate(down.itertuples())) + "</ul>"
+        else:
+            body += ("<p>Nothing about it pushed the score strongly down; it simply never gathered enough evidence to rise "
+                     "above the threshold from the average transaction's low starting point.</p>")
+        if len(up):
+            body += f"<p style='margin-top:.5rem'>What still pointed to fraud:</p><ul><li>{item(next(up.itertuples()), 'raised', False)}</li></ul>"
+    else:
+        outcome = {(True, True): "It was fraud, so this is a correct catch.",
+                   (True, False): "It was a normal transaction, so this is a false alarm.",
+                   (False, False): "It was a normal transaction, correctly cleared."}[(flagged, bool(is_fraud))]
+        top = sig.reindex(sig["contribution"].abs().sort_values(ascending=False).index).head(3)
+        body = f"<p class='lead'>{pos} {outcome}</p><p>Main reasons, strongest first:</p><ul>" + "".join(
+            f"<li>{item(r, 'raised' if r.contribution > 0 else 'lowered', i == 0)}</li>" for i, r in enumerate(top.itertuples())) + "</ul>"
+    return f"<div class='insight'><h4>Why this score, in plain words</h4>{body}</div>"
+
+
 def inspector(df, label_col, score_col, model, feats, about):
     head("Why did the model score this transaction this way?",
          f"Pick a transaction and see which pieces of information raised or lowered its fraud score, measured with {t('SHAP')}. "
@@ -476,14 +548,10 @@ def inspector(df, label_col, score_col, model, feats, about):
         ex, base = explain(model, row, feats)
         ex["label"] = ex["feature"].map(lambda f: FEATURE_TEXT.get(f, f))
         ex = ex.reindex(ex["contribution"].sort_values(ascending=False).index)
-        diverging([(r.label, r.contribution, nice(r.value)) for r in ex.itertuples()], "What drove this score",
+        H(plain_reasons(ex, float(row[score_col]), th, row[label_col] == 1))
+        diverging([(r.label, r.contribution, nice(r.value)) for r in ex.itertuples()], "What drove this score, in detail",
                   "Each row is one piece of information about this transaction. A longer bar had a bigger effect. "
                   "Numbers are in log-odds, the model's internal scale (explained below).")
-        top = ex.reindex(ex["contribution"].abs().sort_values(ascending=False).index).head(3)
-        up = [f"{r.label} ({nice(r.value)})" for r in top.itertuples() if r.contribution > 0]
-        down = [f"{r.label} ({nice(r.value)})" for r in top.itertuples() if r.contribution <= 0]
-        pts = ([f"Raised the score most: {', '.join(up)}."] if up else []) + ([f"Lowered the score most: {', '.join(down)}."] if down else [])
-        insight(pts, "The strongest reasons, in words")
         total = base + float(ex["contribution"].sum())
         note(f"<b>How the numbers add up.</b> The model starts every transaction from the same point, the average case "
              f"({base:+.2f}). Adding all the bars to it gives {total:+.2f}, which converts to the fraud score "
@@ -641,11 +709,13 @@ with st.container(key="topnav"):
         page = pick("Dataset", PAGES, "page", "Introduction")
     level = None
     if page == "Noisy simulation":
-        a2, b2 = st.columns([1.45, 4.85], vertical_alignment="center")
-        a2.markdown("<div style='font-weight:700;font-size:.92rem;color:var(--ink2);text-align:right;padding-right:.4rem'>"
-                    "Noise level</div>", unsafe_allow_html=True)
-        with b2:
-            level = pick("Noise level", LEVELS, "level", "clean")
+        with st.container(key="levelbar"):
+            a2, b2 = st.columns([1.45, 4.85], vertical_alignment="center")
+            a2.markdown("<div class='levellab'>Choose the noise level<small>clean = no camouflage, high = the most</small></div>",
+                        unsafe_allow_html=True)
+            with b2:
+                level = pick("Noise level", LEVELS, "level", "clean")
+H("<div class='hint'>Tip: words with a dotted underline and \u24D8 show a definition when you hover over them.</div>")
 
 man = load_json("manifest.json")
 def _half_up(o):
@@ -665,6 +735,7 @@ P, S, N = (_half_up(x) for x in (R.PAYSIM, R.SIMULATION, R.NOISY))
 # ================================================================ START HERE
 if page == "Introduction":
     g, ng = P["rolling"]["models"]
+    purpose("what the project does, the three datasets it uses, and where to find each result.", "page")
     c1, c2 = st.columns([1.05, 1], gap="large", vertical_alignment="center")
     with c1:
         hero("Fraud hides in who pays whom",
@@ -724,6 +795,7 @@ if page == "PaySim":
     g, ng = P["rolling"]["models"]
     fa_cut, caught_up = 1 - g["false_alarms"] / ng["false_alarms"], g["caught"] / ng["caught"] - 1
     with tabs[0]:
+        purpose("the main result. On future transactions, the graph model raises far fewer false alarms than the same model without graph features.")
         hero("PaySim", "2.77 million synthetic mobile-money transactions. The model learns from earlier weeks and is tested on the "
              f"final weeks, which it never saw: the {t('rolling window', 'rolling window')} test.")
         H("<div style='height:.9rem'></div>")
@@ -758,6 +830,7 @@ if page == "PaySim":
                  "The gain comes from PageRank and Degree, not from rings: fraud receivers have about half the connections of normal ones."])
 
     with tabs[1]:
+        purpose("what the receiving account looked like in the network before the transaction was scored.")
         head("What a fraud receiver looks like in the network",
              "Each picture is a before snapshot: the account that received one test transaction, with the accounts it dealt with in "
              "steps 1-594. Dot colours show fraud in that earlier history only. The transaction being scored came later and is drawn "
@@ -795,6 +868,11 @@ if page == "PaySim":
     with tabs[2]:
         with st.container(key="sections"):
             sec = pick("Section", ["Future data", "Algorithms", "Threshold", "Random split", "How the method was fixed"], "sec_paysim", "Future data")
+        purpose({"Future data": "the main test: learn from the past, predict the future, with and without graph features.",
+                 "Algorithms": "whether the gain holds for three algorithms and five random seeds.",
+                 "Threshold": "how moving the alert threshold trades fraud caught against false alarms.",
+                 "Random split": "an easier, shuffled test, and why its scores are not the main result.",
+                 "How the method was fixed": "the four steps that turned an unfair test into a fair one."}[sec], "section")
         if sec == "Future data":
             head("Predicting future transactions",
                  f"The {t('rolling window')} test copies how a bank would work: learn from the past, predict the future, and only use "
@@ -937,6 +1015,7 @@ if page == "PaySim":
                          "only new accounts, so they are not comparable with the overall 0.556."])
 
     with tabs[3]:
+        purpose("why the model gave one transaction its score, in plain words first, then in detail.")
         if rw is None:
             missing("The Prediction Inspector", "python dashboard_prepare.py")
         else:
@@ -952,6 +1031,7 @@ elif page == "Simulation (best case)":
     d = S["dataset"]
     f = S["models"][2]
     with tabs[0]:
+        purpose("the best case. When fraud rings reuse their mule accounts, Louvain isolates every ring.")
         hero("Simulation: reused mule rings",
              "Built because PaySim never reuses mule accounts, so Louvain had nothing to find. Forty fraud rings each reuse 5-12 "
              "mule accounts across many laundering events, and each ring has its own victims. Rings are cleanly separated by design: "
@@ -971,6 +1051,7 @@ elif page == "Simulation (best case)":
                  f"The final model scores {f['pr_auc']:.3f} on a batch it never saw, so what it learned carries over to new data.",
                  "This is the best case. The noisy simulation tests what happens when fraud is harder to separate."])
     with tabs[1]:
+        purpose("the groups Louvain found: fraud rings (orange) separate from normal customers (blue).")
         head("Louvain's communities",
              "Each dot is an account and each line a transaction between two members of the same community. An all-orange cluster is a "
              "fraud ring; an all-blue group is ordinary customers paying each other.")
@@ -981,7 +1062,8 @@ elif page == "Simulation (best case)":
             comms = gr["communities"]
             lab = [f"{'Fraud ring' if c['kind'] == 'fraud' else 'Normal community'} {c['community']}: "
                    f"{c['accounts']:,} accounts, {c['density']:.0%} fraud" for c in comms]
-            i = st.selectbox("Community", range(len(comms)), format_func=lambda k: lab[k])
+            i = st.selectbox("Community: use the dropdown to switch between fraud rings and normal communities",
+                             range(len(comms)), format_func=lambda k: lab[k])
             cm = comms[i]
             grid([kpi("Accounts", f"{cm['accounts']:,}", f"{len(cm['nodes'])} shown" if cm["sampled"] else "", "sm"),
                   kpi("Transactions inside", f"{cm['tx']:,}", "between two members", "sm"),
@@ -993,6 +1075,7 @@ elif page == "Simulation (best case)":
             note("Training batch, the same data as the report's Louvain table. Community numbers differ from the report because Louvain "
                  "labels communities differently on every run. Large communities are shown as a connected sample of 250 accounts.")
     with tabs[2]:
+        purpose("why the final model leaves out community size, and how it scores on a new batch of data.")
         head("Why the final model is not the highest-scoring one",
              "The model with community size scores almost perfectly, but only through a shortcut: in this dataset every ring is a small, "
              "separate community, so community size alone gives the answer. Real fraud is not that tidy.")
@@ -1027,6 +1110,7 @@ elif page == "Simulation (best case)":
             threshold_panel(sim["isFraud"].values, {"Final model": sim["score"].values}, "thr_sim",
                             foot="On this best-case data the curve stays near the top until high recall.")
     with tabs[3]:
+        purpose("why the model gave one transaction its score, in plain words first, then in detail.")
         if sim is None:
             missing("The Prediction Inspector", "python dashboard_prepare.py")
         else:
@@ -1047,6 +1131,7 @@ else:
         "Mules replaced per week": "Old mule accounts are dropped and new ones recruited, so a ring's accounts change over time.",
     }
     with tabs[0]:
+        purpose(f"what changes at the {level} level, and how much fraud Louvain still isolates.")
         hero(f"Noisy simulation, {level} level",
              "The same rings, made harder to see. Only fraud behaviour changes between the four levels, following published research on "
              f"how fraud hides. Tested with the same {t('rolling window')} as PaySim. Amount, time and type carry no fraud signal by "
@@ -1072,6 +1157,7 @@ else:
                  f"{L['louvain_min']:.0%} and {L['louvain_max']:.0%} across 5 reloads of the same data).",
                  f"The final model scores {L['G-noCS']:.3f}, about {L['G-noCS'] / L['chance']:.0f} times what random guessing would score."])
     with tabs[1]:
+        purpose("how fraud rings blend into normal communities as camouflage grows. Change the level at the top to compare.")
         head(f"Louvain's communities at the {level} level",
              "An all-orange cluster is a ring Louvain kept separate. Orange mixed into blue means fraud accounts were absorbed into a large "
              f"normal community, hidden among normal activity. Switch the noise level at the top to watch rings merge as {t('camouflage')} grows.")
@@ -1082,7 +1168,8 @@ else:
             comms = gr["communities"]
             lab = [f"{'Top fraud' if c['kind'] == 'fraud' else 'Large normal'} community {c['community']}: "
                    f"{c['accounts']:,} accounts, {c['density']:.1%} fraud" for c in comms]
-            i = st.selectbox("Community", range(len(comms)), format_func=lambda k: lab[k], key=f"comm_{level}")
+            i = st.selectbox("Community: use the dropdown to switch between fraud communities and normal ones",
+                             range(len(comms)), format_func=lambda k: lab[k], key=f"comm_{level}")
             cm = comms[i]
             grid([kpi("Accounts", f"{cm['accounts']:,}", f"{len(cm['nodes'])} shown" if cm["sampled"] else "", "sm"),
                   kpi("Transactions inside", f"{cm['tx']:,}", "between two members", "sm"),
@@ -1097,6 +1184,10 @@ else:
         with st.container(key="sections"):
             sec = pick("Section", ["Across noise levels", "One noise source at a time", "Why community size was dropped", "Threshold"],
                        "sec_noisy", "Across noise levels")
+        purpose({"Across noise levels": "how the models and Louvain hold up from clean to high noise.",
+                 "One noise source at a time": "which kind of camouflage hurts Louvain most.",
+                 "Why community size was dropped": "why community size stopped working once the data was noisy.",
+                 "Threshold": "how moving the alert threshold trades fraud caught against false alarms at this level."}[sec], "section")
         if sec == "Across noise levels":
             head("How the method holds up as fraud hides",
                  "Three models on future data at each level: the final model (PageRank + Degree), the model that also uses community size, "
@@ -1182,6 +1273,7 @@ else:
                                                             "With community size": nz["score_G"].values}, f"thr_{level}",
                                 foot="Without graph features the curve stays near the bottom at every threshold: fraud cannot be separated without the network.")
     with tabs[3]:
+        purpose("why the model gave one transaction its score, in plain words first, then in detail.")
         if nz is None:
             missing("The Prediction Inspector", "python dashboard_prepare.py")
         else:
